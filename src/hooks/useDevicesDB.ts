@@ -4,6 +4,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { toast } from 'sonner';
 import { Database } from '@/integrations/supabase/types';
 import * as local from '@/lib/localBackend';
+import { withRecoveryTimeout } from '@/lib/offlineRecovery';
 
 type Device = Database['public']['Tables']['devices']['Row'];
 type DeviceSession = Database['public']['Tables']['device_sessions']['Row'];
@@ -23,7 +24,7 @@ export interface NewDevice {
 export function useDevicesDB() {
   const [devices, setDevices] = useState<DeviceWithSession[]>([]);
   const [loading, setLoading] = useState(true);
-  const { user, gameCenter, isLocalMode } = useAuth();
+  const { user, gameCenter, isLocalMode, isOnline, loading: authLoading } = useAuth();
 
   const fetchDevices = useCallback(async () => {
     if (isLocalMode) {
@@ -38,16 +39,30 @@ export function useDevicesDB() {
     }
 
     if (!gameCenter?.id) {
+      setDevices([]);
+      setLoading(false);
+      return;
+    }
+    const restoreCache = () => {
+      const cache = user?.id ? local.getCloudCache(user.id) : null;
+      const cachedSessions = (cache?.sessions || []).filter((s: DeviceSession) =>
+        s.game_center_id === gameCenter.id && !s.end_time);
+      setDevices((cache?.devices || []).filter((d: Device) => d.game_center_id === gameCenter.id).map((d: Device) => ({
+        ...d, currentSession: cachedSessions.find((s: DeviceSession) => s.device_id === d.id) || null,
+      })));
+    };
+    if (!isOnline || !navigator.onLine) {
+      restoreCache();
       setLoading(false);
       return;
     }
     try {
-      const { data: devicesData, error: devicesError } = await supabase
-        .from('devices').select('*').eq('game_center_id', gameCenter.id).order('name');
+      const { data: devicesData, error: devicesError } = await withRecoveryTimeout(supabase
+        .from('devices').select('*').eq('game_center_id', gameCenter.id).order('name'));
       if (devicesError) throw devicesError;
 
-      const { data: sessionsData, error: sessionsError } = await supabase
-        .from('device_sessions').select('*').eq('game_center_id', gameCenter.id).is('end_time', null);
+      const { data: sessionsData, error: sessionsError } = await withRecoveryTimeout(supabase
+        .from('device_sessions').select('*').eq('game_center_id', gameCenter.id).is('end_time', null));
       if (sessionsError) throw sessionsError;
 
       setDevices((devicesData || []).map(device => ({
@@ -67,11 +82,7 @@ export function useDevicesDB() {
       // offline fallback: use last cached server data
       const cache = user?.id ? local.getCloudCache(user.id) : null;
       if (cache) {
-        const cachedSessions = (cache.sessions || []).filter((s: any) => !s.end_time);
-        setDevices((cache.devices || []).map((d: any) => ({
-          ...d,
-          currentSession: cachedSessions.find((s: any) => s.device_id === d.id) || null,
-        })));
+        restoreCache();
         toast.info('اتصال قطع است — نمایش آخرین اطلاعات ذخیره‌شده');
       } else {
         toast.error('خطا در دریافت اطلاعات دستگاه‌ها');
@@ -79,11 +90,11 @@ export function useDevicesDB() {
     } finally {
       setLoading(false);
     }
-  }, [gameCenter?.id, isLocalMode, user?.id]);
+  }, [gameCenter?.id, isLocalMode, isOnline, user?.id]);
 
   useEffect(() => {
-    if (isLocalMode || (user && gameCenter)) fetchDevices();
-  }, [user, gameCenter, isLocalMode, fetchDevices]);
+    if (!authLoading) fetchDevices();
+  }, [authLoading, fetchDevices]);
 
   const addDevice = async (newDevice: NewDevice) => {
     if (isLocalMode) {
