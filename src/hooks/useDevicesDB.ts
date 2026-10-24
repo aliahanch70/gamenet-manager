@@ -79,7 +79,7 @@ export function useDevicesDB() {
     } finally {
       setLoading(false);
     }
-  }, [gameCenter?.id, isLocalMode]);
+  }, [gameCenter?.id, isLocalMode, user?.id]);
 
   useEffect(() => {
     if (isLocalMode || (user && gameCenter)) fetchDevices();
