@@ -423,6 +423,37 @@ export async function syncLocalToSupabase(gameCenterId: string, userId: string):
   }
 }
 
+// ============= Cloud cache (offline fallback for signed-in users) =============
+// When a cloud user is online, fetched server data is mirrored into
+// localStorage namespaced by user id. When the connection drops, hooks
+// fall back to this cache so the app keeps working with the last known data.
+
+export interface CloudCache {
+  gameCenter: any | null;
+  devices: any[];
+  sessions: any[];
+  products: any[];
+  sales: any[];
+  cachedAt: string;
+}
+
+const cloudCacheKey = (userId: string) => `cloud_cache_${userId}`;
+
+export function getCloudCache(userId: string): CloudCache | null {
+  return read<CloudCache | null>(cloudCacheKey(userId), null);
+}
+
+export function updateCloudCache(userId: string, partial: Partial<Omit<CloudCache, 'cachedAt'>>) {
+  const current = getCloudCache(userId) || {
+    gameCenter: null, devices: [], sessions: [], products: [], sales: [], cachedAt: '',
+  };
+  write(cloudCacheKey(userId), { ...current, ...partial, cachedAt: new Date().toISOString() });
+}
+
+export function clearCloudCache(userId: string) {
+  localStorage.removeItem(cloudCacheKey(userId));
+}
+
 // ============= Connection probe =============
 export async function probeSupabase(timeoutMs = 4000): Promise<boolean> {
   try {
