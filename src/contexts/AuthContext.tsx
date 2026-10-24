@@ -10,6 +10,7 @@ import {
   syncLocalToSupabase,
   getSyncQueueSize,
   clearLocalData,
+  probeSupabase,
 } from '@/lib/localBackend';
 
 interface GameCenter {
@@ -34,6 +35,10 @@ interface AuthContextType {
   syncLocalToCloud: () => Promise<{ ok: boolean; counts: any; error?: string }>;
   pendingLocalChanges: number;
   isStaffOrAdmin: boolean;
+  isOnline: boolean;
+  syncPromptOpen: boolean;
+  confirmSyncPrompt: () => Promise<void>;
+  dismissSyncPrompt: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -46,6 +51,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [gameCenter, setGameCenter] = useState<GameCenter | null>(null);
   const [isLocalMode, setIsLocalMode] = useState<boolean>(readIsLocalMode());
   const [pendingLocalChanges, setPendingLocalChanges] = useState<number>(0);
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
+  const [syncPromptOpen, setSyncPromptOpen] = useState(false);
+  const wasOfflineRef = { current: false } as { current: boolean };
+
+  // Track connectivity: browser events + periodic probe of the backend
+  useEffect(() => {
+    let mounted = true;
+    const check = async () => {
+      const ok = navigator.onLine ? await probeSupabase() : false;
+      if (!mounted) return;
+      setIsOnline(prev => {
+        if (!prev && ok) {
+          // back online: if the user has cached cloud data, ask about syncing
+          wasOfflineRef.current = false;
+          setSyncPromptOpen(true);
+        } else if (prev && !ok) {
+          wasOfflineRef.current = true;
+        }
+        return ok;
+      });
+    };
+    check();
+    const onOnline = () => check();
+    const onOffline = () => setIsOnline(false);
+    window.addEventListener('online', onOnline);
+    window.addEventListener('offline', onOffline);
+    const interval = setInterval(check, 30000);
+    return () => {
+      mounted = false;
+      window.removeEventListener('online', onOnline);
+      window.removeEventListener('offline', onOffline);
+      clearInterval(interval);
+    };
+  }, []);
 
   // Bootstrap local mode immediately
   useEffect(() => {
@@ -175,6 +214,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result;
   };
 
+  const confirmSyncPrompt = async () => {
+    setSyncPromptOpen(false);
+    await syncLocalToCloud();
+  };
+
+  const dismissSyncPrompt = () => setSyncPromptOpen(false);
+
   const isStaffOrAdmin = userRole === 'admin' || userRole === 'staff';
 
   return (
@@ -193,6 +239,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         syncLocalToCloud,
         pendingLocalChanges,
         isStaffOrAdmin,
+        isOnline,
+        syncPromptOpen,
+        confirmSyncPrompt,
+        dismissSyncPrompt,
       }}
     >
       {children}
