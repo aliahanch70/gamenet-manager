@@ -10,6 +10,8 @@ import {
   syncLocalToSupabase,
   getSyncQueueSize,
   clearLocalData,
+  probeSupabase,
+  getCloudCache,
 } from '@/lib/localBackend';
 
 interface GameCenter {
@@ -34,6 +36,10 @@ interface AuthContextType {
   syncLocalToCloud: () => Promise<{ ok: boolean; counts: any; error?: string }>;
   pendingLocalChanges: number;
   isStaffOrAdmin: boolean;
+  isOnline: boolean;
+  syncPromptOpen: boolean;
+  confirmSyncPrompt: () => Promise<void>;
+  dismissSyncPrompt: () => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
