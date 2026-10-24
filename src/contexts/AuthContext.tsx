@@ -215,6 +215,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return result;
   };
 
+  const confirmSyncPrompt = async () => {
+    setSyncPromptOpen(false);
+    await syncLocalToCloud();
+  };
+
+  const dismissSyncPrompt = () => setSyncPromptOpen(false);
+
   const isStaffOrAdmin = userRole === 'admin' || userRole === 'staff';
 
   return (
@@ -233,6 +240,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         syncLocalToCloud,
         pendingLocalChanges,
         isStaffOrAdmin,
+        isOnline,
+        syncPromptOpen,
+        confirmSyncPrompt,
+        dismissSyncPrompt,
       }}
     >
       {children}
