@@ -18,7 +18,7 @@ interface MainLayoutProps {
 
 export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const { isLocalMode, syncLocalToCloud } = useAuth();
+  const { isLocalMode, syncLocalToCloud, isOnline, syncPromptOpen, confirmSyncPrompt, dismissSyncPrompt } = useAuth();
   const [syncing, setSyncing] = useState(false);
 
   const handleSync = async () => {
@@ -49,8 +49,29 @@ export function MainLayout({ children, title, subtitle }: MainLayoutProps) {
             </Button>
           </div>
         )}
+        {!isOnline && !isLocalMode && (
+          <div className="mx-4 md:mx-8 mt-4 rounded-xl border border-destructive/40 bg-destructive/10 px-4 py-2 flex items-center gap-2 text-sm">
+            <WifiOff className="h-4 w-4 text-destructive" />
+            <span className="text-foreground">اتصال اینترنت قطع است — آخرین اطلاعات ذخیره‌شده نمایش داده می‌شود</span>
+          </div>
+        )}
         <div className="p-4 md:p-8">{children}</div>
       </main>
+
+      <AlertDialog open={syncPromptOpen} onOpenChange={(open) => !open && dismissSyncPrompt()}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>اتصال برقرار شد</AlertDialogTitle>
+            <AlertDialogDescription>
+              اینترنت دوباره وصل شد. آیا می‌خواهید اطلاعات با سرور همگام‌سازی شود؟
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={dismissSyncPrompt}>فعلاً نه</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmSyncPrompt}>همگام‌سازی</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
