@@ -1,6 +1,6 @@
 import { describe, it as test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readPersistedSession, withRecoveryTimeout } from './offlineRecovery';
+import { readPersistedSession, withRecoveryTimeout } from '../src/lib/offlineRecovery';
 
 describe('offline loading recovery', () => {
   test('a stalled request stops waiting instead of loading forever', async () => {
