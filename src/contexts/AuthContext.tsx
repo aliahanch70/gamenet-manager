@@ -202,6 +202,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    activeUserId.current = null;
     if (isLocalMode) {
       disableLocalMode();
       setIsLocalMode(false);
@@ -218,6 +219,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signInLocal = () => {
+    activeUserId.current = null;
     enableLocalModeStorage();
     const lu = getLocalUser();
     setUser({ id: lu.id, email: lu.email, user_metadata: lu.user_metadata } as any);
