@@ -456,15 +456,19 @@ export function clearCloudCache(userId: string) {
 
 // ============= Connection probe =============
 export async function probeSupabase(timeoutMs = 4000): Promise<boolean> {
+  const controller = new AbortController();
+  const t = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const controller = new AbortController();
-    const t = setTimeout(() => controller.abort(), timeoutMs);
     const url = (import.meta as any).env.VITE_SUPABASE_URL;
     if (!url) return false;
-    const res = await fetch(`${url}/auth/v1/health`, { signal: controller.signal });
-    clearTimeout(t);
+    const res = await fetch(`${url}/auth/v1/health`, {
+      signal: controller.signal,
+      headers: { apikey: import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY },
+    });
     return res.ok;
   } catch {
     return false;
+  } finally {
+    clearTimeout(t);
   }
 }
