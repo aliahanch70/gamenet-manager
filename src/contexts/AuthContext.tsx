@@ -11,7 +11,6 @@ import {
   getSyncQueueSize,
   clearLocalData,
   probeSupabase,
-  getCloudCache,
 } from '@/lib/localBackend';
 
 interface GameCenter {
