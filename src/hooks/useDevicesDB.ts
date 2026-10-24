@@ -54,9 +54,28 @@ export function useDevicesDB() {
         ...device,
         currentSession: sessionsData?.find(s => s.device_id === device.id) || null,
       })));
+      // mirror to local cache for offline use
+      if (user?.id) {
+        local.updateCloudCache(user.id, {
+          devices: devicesData || [],
+          sessions: sessionsData || [],
+          gameCenter,
+        });
+      }
     } catch (error) {
       console.error('Error fetching devices:', error);
-      toast.error('خطا در دریافت اطلاعات دستگاه‌ها');
+      // offline fallback: use last cached server data
+      const cache = user?.id ? local.getCloudCache(user.id) : null;
+      if (cache) {
+        const cachedSessions = (cache.sessions || []).filter((s: any) => !s.end_time);
+        setDevices((cache.devices || []).map((d: any) => ({
+          ...d,
+          currentSession: cachedSessions.find((s: any) => s.device_id === d.id) || null,
+        })));
+        toast.info('اتصال قطع است — نمایش آخرین اطلاعات ذخیره‌شده');
+      } else {
+        toast.error('خطا در دریافت اطلاعات دستگاه‌ها');
+      }
     } finally {
       setLoading(false);
     }
