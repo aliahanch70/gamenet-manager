@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import { createContext, useContext, useEffect, useState, useRef, ReactNode } from 'react';
 import { User, Session } from '@supabase/supabase-js';
 import { supabase } from '@/integrations/supabase/client';
 import {
@@ -11,7 +11,10 @@ import {
   getSyncQueueSize,
   clearLocalData,
   probeSupabase,
+  getCloudCache,
+  updateCloudCache,
 } from '@/lib/localBackend';
+import { readPersistedSession, withRecoveryTimeout } from '@/lib/offlineRecovery';
 
 interface GameCenter {
   id: string;
@@ -53,7 +56,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [pendingLocalChanges, setPendingLocalChanges] = useState<number>(0);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [syncPromptOpen, setSyncPromptOpen] = useState(false);
-  const wasOfflineRef = { current: false } as { current: boolean };
+  const wasOfflineRef = useRef(false);
+  const activeUserId = useRef<string | null>(null);
 
   // Track connectivity: browser events + periodic probe of the backend
   useEffect(() => {
@@ -99,34 +103,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, sess) => {
+    let mounted = true;
+    const applySession = (sess: Session | null) => {
+      if (!mounted || readIsLocalMode()) return;
+      const nextId = sess?.user.id ?? null;
+      if (activeUserId.current !== nextId) {
+        setUserRole(null);
+        setGameCenter(null);
+      }
+      activeUserId.current = nextId;
       setSession(sess);
       setUser(sess?.user ?? null);
       if (sess?.user) {
+        const cache = getCloudCache(sess.user.id);
+        if (cache?.gameCenter?.id) setGameCenter(cache.gameCenter);
         setTimeout(() => fetchUserData(sess.user.id), 0);
       } else {
         setUserRole(null);
         setGameCenter(null);
       }
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) fetchUserData(session.user.id);
       setLoading(false);
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, sess) => {
+      applySession(sess);
     });
 
-    return () => subscription.unsubscribe();
+    withRecoveryTimeout(supabase.auth.getSession()).then(({ data: { session } }) => {
+      applySession(session);
+    }).catch(() => {
+      // Refresh can retry indefinitely offline. Recover only this client's session.
+      const host = new URL(import.meta.env.VITE_SUPABASE_URL).hostname.split('.')[0];
+      if (!activeUserId.current) applySession(readPersistedSession(localStorage, `sb-${host}-auth-token`));
+      if (mounted) { setIsOnline(false); setLoading(false); }
+    });
+
+    return () => { mounted = false; subscription.unsubscribe(); };
   }, []);
 
   const fetchUserData = async (userId: string) => {
+    const cache = getCloudCache(userId);
+    if (activeUserId.current === userId && cache?.gameCenter?.id) setGameCenter(cache.gameCenter);
+    if (!navigator.onLine) return;
     try {
-      const { data: roleData, error: roleError } = await supabase
+      const { data: roleData, error: roleError } = await withRecoveryTimeout(supabase
         .from('user_roles')
         .select('role, game_center_id')
         .eq('user_id', userId)
-        .maybeSingle();
+        .maybeSingle());
+
+      if (activeUserId.current !== userId) return;
 
       if (roleError) {
         console.error('Error fetching user role:', roleError);
@@ -136,12 +162,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (roleData) {
         setUserRole(roleData.role as 'admin' | 'staff' | 'customer');
         if (roleData.game_center_id) {
-          const { data: gcData } = await supabase
+          const { data: gcData } = await withRecoveryTimeout(supabase
             .from('game_centers')
             .select('*')
             .eq('id', roleData.game_center_id)
-            .maybeSingle();
-          if (gcData) setGameCenter(gcData);
+            .maybeSingle());
+          if (activeUserId.current !== userId) return;
+          if (gcData) {
+            setGameCenter(gcData);
+            updateCloudCache(userId, { gameCenter: gcData });
+          }
         }
       }
     } catch (error) {
@@ -163,8 +193,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({ email, password });
-    return { error: error as Error | null };
+    try {
+      const { error } = await withRecoveryTimeout(supabase.auth.signInWithPassword({ email, password }));
+      return { error: error as Error | null };
+    } catch {
+      return { error: new Error('اتصال برقرار نیست؛ لطفاً دوباره تلاش کنید یا وارد حالت لوکال شوید') };
+    }
   };
 
   const signOut = async () => {
@@ -191,6 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setUserRole('admin');
     setIsLocalMode(true);
     setPendingLocalChanges(getSyncQueueSize());
+    setLoading(false);
   };
 
   const syncLocalToCloud = async () => {
